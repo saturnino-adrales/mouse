@@ -38,3 +38,7 @@ request_permission.py
 config.ini
 settings.json
 *.env
+
+# Mouse app config files
+.mouse_server_config.json
+.mouse_client_config.json

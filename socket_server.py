@@ -3,6 +3,7 @@ import threading
 import netifaces
 import time
 import json
+import os
 from pynput.mouse import Button, Listener
 from pynput import mouse
 import tkinter as tk
@@ -40,6 +41,29 @@ class MouseServer:
         return interfaces
     
     @staticmethod
+    def load_saved_interface():
+        """Load the last selected interface from config file"""
+        config_file = '.mouse_server_config.json'
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    return config.get('last_interface')
+            except Exception:
+                pass
+        return None
+    
+    @staticmethod
+    def save_interface(interface):
+        """Save the selected interface to config file"""
+        config_file = '.mouse_server_config.json'
+        try:
+            with open(config_file, 'w') as f:
+                json.dump({'last_interface': interface}, f)
+        except Exception as e:
+            print(f"[SERVER] Warning: Could not save config: {e}")
+    
+    @staticmethod
     def select_interface():
         interfaces = MouseServer.get_network_interfaces()
         
@@ -47,30 +71,56 @@ class MouseServer:
             print("No network interfaces found. Using localhost.")
             return 'localhost'
         
+        # Check for saved interface
+        saved_interface = MouseServer.load_saved_interface()
+        
         print("\nAvailable network interfaces:")
         print("0. localhost (127.0.0.1)")
         
         interface_list = list(interfaces.items())
+        default_choice = None
+        
         for i, (name, ip) in enumerate(interface_list, 1):
-            print(f"{i}. {name}: {ip}")
+            is_saved = (ip == saved_interface)
+            if is_saved:
+                default_choice = i
+                print(f"{i}. {name}: {ip} [LAST USED]")
+            else:
+                print(f"{i}. {name}: {ip}")
             if 'bridge' in name.lower():
                 print(f"   ^ Thunderbolt Bridge detected")
         
+        # Determine default
+        if saved_interface == 'localhost':
+            default_choice = 0
+        
+        default_text = f" (default: {default_choice})" if default_choice is not None else " (default: 0 for localhost)"
+        
         while True:
             try:
-                choice = input("\nSelect interface number (default: 0 for localhost): ").strip()
+                choice = input(f"\nSelect interface number{default_text}: ").strip()
                 if not choice:
-                    return 'localhost'
+                    if default_choice is not None:
+                        choice = default_choice
+                    else:
+                        choice = 0
+                else:
+                    choice = int(choice)
                     
-                choice = int(choice)
                 if choice == 0:
-                    return 'localhost'
+                    selected = 'localhost'
+                    print(f"Selected: localhost (127.0.0.1)")
                 elif 1 <= choice <= len(interface_list):
-                    selected_ip = interface_list[choice - 1][1]
-                    print(f"Selected: {interface_list[choice - 1][0]} ({selected_ip})")
-                    return selected_ip
+                    selected = interface_list[choice - 1][1]
+                    print(f"Selected: {interface_list[choice - 1][0]} ({selected})")
                 else:
                     print("Invalid choice. Please try again.")
+                    continue
+                
+                # Save the selection
+                MouseServer.save_interface(selected)
+                return selected
+                
             except ValueError:
                 print("Invalid input. Please enter a number.")
         

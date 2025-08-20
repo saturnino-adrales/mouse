@@ -3,8 +3,8 @@ import sys
 import threading
 import time
 import json
+import os
 from pynput import mouse
-import platform
 import tkinter as tk
 
 class MouseClient:
@@ -213,15 +213,44 @@ class MouseClient:
         finally:
             self.disconnect()
 
+def load_saved_server():
+    """Load the last used server IP from config file"""
+    config_file = '.mouse_client_config.json'
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+                return config.get('last_server')
+        except Exception:
+            pass
+    return None
+
+def save_server(server_ip):
+    """Save the server IP to config file"""
+    config_file = '.mouse_client_config.json'
+    try:
+        with open(config_file, 'w') as f:
+            json.dump({'last_server': server_ip}, f)
+    except Exception as e:
+        print(f"[CLIENT] Warning: Could not save config: {e}")
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         host = sys.argv[1]
-        print(f"[CLIENT] Connecting to server at {host}")
-        client = MouseClient(host=host)
+        print(f"[CLIENT] Using server from command line: {host}")
     else:
-        host = input("Enter server IP address (default: localhost): ").strip()
+        # Check for saved server
+        saved_server = load_saved_server()
+        default_text = f" (default: {saved_server})" if saved_server else " (default: localhost)"
+        
+        host = input(f"Enter server IP address{default_text}: ").strip()
         if not host:
-            host = 'localhost'
-        client = MouseClient(host=host)
+            host = saved_server if saved_server else 'localhost'
+        
+        print(f"[CLIENT] Connecting to server at {host}")
     
+    # Save the server for next time
+    save_server(host)
+    
+    client = MouseClient(host=host)
     client.run()
