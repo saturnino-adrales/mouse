@@ -1,6 +1,7 @@
 import socket
 import sys
 import threading
+import time
 from pynput import mouse
 
 class MouseClient:
@@ -10,6 +11,9 @@ class MouseClient:
         self.socket = None
         self.running = False
         self.mouse_listener = None
+        self.coordinate_count = 0
+        self.last_coordinates = None
+        self.last_print_time = time.time()
         
     def connect(self):
         try:
@@ -41,8 +45,15 @@ class MouseClient:
     def on_move(self, x, y):
         if self.running:
             coordinates = f"{int(x)},{int(y)}"
-            self.send_coordinates(coordinates)
-            print(f"Mouse moved to: {coordinates}")
+            if self.send_coordinates(coordinates):
+                self.coordinate_count += 1
+                self.last_coordinates = coordinates
+                
+                # Print every 10th coordinate or every 0.5 seconds
+                current_time = time.time()
+                if self.coordinate_count % 10 == 0 or (current_time - self.last_print_time) >= 0.5:
+                    print(f"[CLIENT] Sent: {coordinates} (Total: {self.coordinate_count} coordinates)")
+                    self.last_print_time = current_time
     
     def on_click(self, x, y, button, pressed):
         if pressed and button == mouse.Button.right:

@@ -1,6 +1,7 @@
 import socket
 import threading
 import netifaces
+import time
 from pynput.mouse import Button, Listener
 from pynput import mouse
 
@@ -11,6 +12,7 @@ class MouseServer:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.mouse_controller = mouse.Controller()
+        self.client_counters = {}
     
     @staticmethod
     def get_network_interfaces():
@@ -60,7 +62,10 @@ class MouseServer:
                 print("Invalid input. Please enter a number.")
         
     def handle_client(self, client_socket, address):
-        print(f"Connection from {address}")
+        print(f"[SERVER] Connection from {address}")
+        client_id = f"{address[0]}:{address[1]}"
+        self.client_counters[client_id] = {'count': 0, 'last_print': time.time()}
+        
         try:
             while True:
                 data = client_socket.recv(1024).decode('utf-8')
@@ -70,21 +75,35 @@ class MouseServer:
                 lines = data.strip().split('\n')
                 for line in lines:
                     if line.strip():
-                        self.parse_and_move(line.strip())
+                        self.parse_and_move(line.strip(), client_id)
                         
         except Exception as e:
-            print(f"Error handling client {address}: {e}")
+            print(f"[SERVER] Error handling client {address}: {e}")
         finally:
+            if client_id in self.client_counters:
+                total = self.client_counters[client_id]['count']
+                print(f"[SERVER] Client {address} disconnected. Total coordinates received: {total}")
+                del self.client_counters[client_id]
             client_socket.close()
-            print(f"Connection with {address} closed")
     
-    def parse_and_move(self, coordinate_string):
+    def parse_and_move(self, coordinate_string, client_id):
         try:
             x, y = map(int, coordinate_string.split(','))
-            print(f"Moving mouse to ({x}, {y})")
             self.mouse_controller.position = (x, y)
+            
+            # Update counter
+            if client_id in self.client_counters:
+                self.client_counters[client_id]['count'] += 1
+                count = self.client_counters[client_id]['count']
+                current_time = time.time()
+                last_print = self.client_counters[client_id]['last_print']
+                
+                # Print every 10th coordinate or every 0.5 seconds
+                if count % 10 == 0 or (current_time - last_print) >= 0.5:
+                    print(f"[SERVER] Received from {client_id}: ({x}, {y}) - Total: {count} coordinates")
+                    self.client_counters[client_id]['last_print'] = current_time
         except ValueError:
-            print(f"Invalid coordinate format: {coordinate_string}")
+            print(f"[SERVER] Invalid coordinate format: {coordinate_string}")
     
     def start(self):
         self.socket.bind((self.host, self.port))
