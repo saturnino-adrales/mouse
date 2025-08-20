@@ -1,11 +1,15 @@
 import socket
 import sys
+import threading
+from pynput import mouse
 
 class MouseClient:
     def __init__(self, host='localhost', port=12345):
         self.host = host
         self.port = port
         self.socket = None
+        self.running = False
+        self.mouse_listener = None
         
     def connect(self):
         try:
@@ -27,38 +31,48 @@ class MouseClient:
             return False
     
     def disconnect(self):
+        self.running = False
+        if self.mouse_listener:
+            self.mouse_listener.stop()
         if self.socket:
             self.socket.close()
             print("Disconnected from server")
     
+    def on_move(self, x, y):
+        if self.running:
+            coordinates = f"{int(x)},{int(y)}"
+            self.send_coordinates(coordinates)
+            print(f"Mouse moved to: {coordinates}")
+    
+    def on_click(self, x, y, button, pressed):
+        if pressed and button == mouse.Button.right:
+            print("Right click detected - stopping mouse tracking")
+            self.running = False
+            return False
+    
+    def start_mouse_listener(self):
+        self.mouse_listener = mouse.Listener(
+            on_move=self.on_move,
+            on_click=self.on_click
+        )
+        self.mouse_listener.start()
+    
     def run(self):
         if not self.connect():
             return
-            
-        print("Enter coordinates in format 'x,y' (e.g., '100,200')")
-        print("Type 'quit' to exit")
+        
+        print("\n=== Mouse Tracking Mode ===")
+        print("Your mouse movements are now being sent to the server")
+        print("Right-click to stop tracking")
+        print("Press Ctrl+C to exit\n")
+        
+        self.running = True
+        self.start_mouse_listener()
         
         try:
-            while True:
-                user_input = input("Coordinates: ").strip()
-                
-                if user_input.lower() == 'quit':
-                    break
-                
-                if not user_input:
-                    continue
-                    
-                try:
-                    x, y = map(int, user_input.split(','))
-                    if self.send_coordinates(user_input):
-                        print(f"Sent coordinates: {x}, {y}")
-                    else:
-                        break
-                except ValueError:
-                    print("Invalid format. Please use 'x,y' format (e.g., '100,200')")
-                    
+            self.mouse_listener.join()
         except KeyboardInterrupt:
-            print("\nExiting...")
+            print("\nStopping mouse tracking...")
         finally:
             self.disconnect()
 
