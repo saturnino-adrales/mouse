@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 from pynput import mouse
+import platform
 
 class MouseClient:
     def __init__(self, host='localhost', port=12345):
@@ -43,8 +44,15 @@ class MouseClient:
             print("Disconnected from server")
     
     def on_move(self, x, y):
+        print(f"DEBUG: on_move called with x={x}, y={y}, running={self.running}")  # Debug line
         if self.running:
             coordinates = f"{int(x)},{int(y)}"
+            print(f"DEBUG: Coordinates formatted: {coordinates}")  # Debug line
+            
+            # Always print the first coordinate to confirm it's working
+            if self.coordinate_count == 0:
+                print(f"✅ Mouse tracking is working! First coordinate: {coordinates}")
+            
             if self.send_coordinates(coordinates):
                 self.coordinate_count += 1
                 self.last_coordinates = coordinates
@@ -54,6 +62,8 @@ class MouseClient:
                 if self.coordinate_count % 10 == 0 or (current_time - self.last_print_time) >= 0.5:
                     print(f"[CLIENT] Sent: {coordinates} (Total: {self.coordinate_count} coordinates)")
                     self.last_print_time = current_time
+            else:
+                print(f"DEBUG: Failed to send coordinates")  # Debug line
     
     def on_click(self, x, y, button, pressed):
         if pressed and button == mouse.Button.right:
@@ -62,11 +72,23 @@ class MouseClient:
             return False
     
     def start_mouse_listener(self):
-        self.mouse_listener = mouse.Listener(
-            on_move=self.on_move,
-            on_click=self.on_click
-        )
-        self.mouse_listener.start()
+        try:
+            self.mouse_listener = mouse.Listener(
+                on_move=self.on_move,
+                on_click=self.on_click
+            )
+            self.mouse_listener.start()
+            print("Mouse listener started successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to start mouse listener: {e}")
+            if platform.system() == 'Darwin':  # macOS
+                print("\n⚠️  PERMISSION ERROR DETECTED ⚠️")
+                print("On macOS, you need to grant Accessibility permissions:")
+                print("1. Open System Settings → Privacy & Security → Accessibility")
+                print("2. Add Terminal (or your Python IDE) to the list")
+                print("3. Enable the checkbox next to it")
+                print("4. You may need to restart Terminal after granting permissions")
+            raise
     
     def run(self):
         if not self.connect():
