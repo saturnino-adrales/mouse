@@ -2,8 +2,10 @@ import socket
 import threading
 import netifaces
 import time
+import json
 from pynput.mouse import Button, Listener
 from pynput import mouse
+import tkinter as tk
 
 class MouseServer:
     def __init__(self, host='localhost', port=12345):
@@ -13,6 +15,17 @@ class MouseServer:
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.mouse_controller = mouse.Controller()
         self.client_counters = {}
+        self.screen_width, self.screen_height = self.get_screen_size()
+        self.active_control = False  # Whether server is controlling mouse
+        print(f"[SERVER] Screen size: {self.screen_width}x{self.screen_height}")
+    
+    @staticmethod
+    def get_screen_size():
+        root = tk.Tk()
+        width = root.winfo_screenwidth()
+        height = root.winfo_screenheight()
+        root.destroy()
+        return width, height
     
     @staticmethod
     def get_network_interfaces():
@@ -67,6 +80,16 @@ class MouseServer:
         self.client_counters[client_id] = {'count': 0, 'last_print': time.time()}
         
         try:
+            # Send screen dimensions to client on connect
+            screen_info = {
+                'type': 'screen_info',
+                'width': self.screen_width,
+                'height': self.screen_height
+            }
+            message = json.dumps(screen_info) + '\n'
+            client_socket.send(message.encode('utf-8'))
+            print(f"[SERVER] Sent screen info to client: {self.screen_width}x{self.screen_height}")
+            
             while True:
                 data = client_socket.recv(1024).decode('utf-8')
                 if not data:
@@ -75,7 +98,7 @@ class MouseServer:
                 lines = data.strip().split('\n')
                 for line in lines:
                     if line.strip():
-                        self.parse_and_move(line.strip(), client_id)
+                        self.handle_message(line.strip(), client_id, client_socket)
                         
         except Exception as e:
             print(f"[SERVER] Error handling client {address}: {e}")
@@ -84,12 +107,45 @@ class MouseServer:
                 total = self.client_counters[client_id]['count']
                 print(f"[SERVER] Client {address} disconnected. Total coordinates received: {total}")
                 del self.client_counters[client_id]
+            self.active_control = False
             client_socket.close()
     
-    def parse_and_move(self, coordinate_string, client_id):
+    def handle_message(self, message_string, client_id, client_socket):
         try:
-            x, y = map(int, coordinate_string.split(','))
-            self.mouse_controller.position = (x, y)
+            # Try to parse as JSON first
+            try:
+                message = json.loads(message_string)
+                if message.get('type') == 'mouse_enter':
+                    # Client mouse is entering server screen from the right
+                    self.active_control = True
+                    y = message.get('y', 0)
+                    # Place mouse at right edge of server screen
+                    self.mouse_controller.position = (self.screen_width - 1, y)
+                    print(f"[SERVER] Mouse control activated at ({self.screen_width - 1}, {y})")
+                    return
+                elif message.get('type') == 'mouse_leave':
+                    # Mouse is leaving server screen
+                    self.active_control = False
+                    print(f"[SERVER] Mouse control deactivated")
+                    return
+            except json.JSONDecodeError:
+                # Fall back to coordinate parsing
+                pass
+            
+            # Parse as coordinates
+            x, y = map(int, message_string.split(','))
+            
+            # Only move mouse if server has active control
+            if self.active_control:
+                self.mouse_controller.position = (x, y)
+                
+                # Check if mouse is leaving to the right (back to client)
+                if x >= self.screen_width - 5:  # Near right edge
+                    self.active_control = False
+                    # Send control back to client
+                    response = json.dumps({'type': 'return_control', 'y': y}) + '\n'
+                    client_socket.send(response.encode('utf-8'))
+                    print(f"[SERVER] Returning control to client at y={y}")
             
             # Update counter
             if client_id in self.client_counters:
@@ -100,10 +156,11 @@ class MouseServer:
                 
                 # Print every 10th coordinate or every 0.5 seconds
                 if count % 10 == 0 or (current_time - last_print) >= 0.5:
-                    print(f"[SERVER] Received from {client_id}: ({x}, {y}) - Total: {count} coordinates")
+                    status = "ACTIVE" if self.active_control else "INACTIVE"
+                    print(f"[SERVER] [{status}] Received from {client_id}: ({x}, {y}) - Total: {count} coordinates")
                     self.client_counters[client_id]['last_print'] = current_time
         except ValueError:
-            print(f"[SERVER] Invalid coordinate format: {coordinate_string}")
+            print(f"[SERVER] Invalid message format: {message_string}")
     
     def start(self):
         self.socket.bind((self.host, self.port))
